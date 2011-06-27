@@ -2,6 +2,7 @@
 
 use strict;
 use warnings;
+use 5.010;
 
 use DateTime;
 use Image::Magick;
@@ -21,19 +22,94 @@ sub magick {
 	return $x;
 }
 
-my $filter_line = qr/^(....)-(..)-(..) (..):(..):.. (?:<.| \* )${ARGV[0]}[> ]/;
+my $nick = shift or die("Usage: $0 <nick>\n");
+
+my %month_map = (
+	Jan => '01',
+	Feb => '02',
+	Mar => '03',
+	Apr => '04',
+	May => '05',
+	Jun => '06',
+	Jul => '07',
+	Aug => '08',
+	Sep => '09',
+	Oct => '10',
+	Nov => '11',
+	Dec => '12',
+);
+
+my %state;
+
+my @matches = (
+	qr{
+		^
+		(?<year> ... ) -
+		(?<month> .. ) -
+		(?<day> .. ) -
+		\s
+		(?<hour> .. ) :
+		(?<minute> .. ) : ..
+		\s
+		(?: < . | \s \* \s )
+		(?<nick> $nick )
+		[> ]
+	}x,
+	qr{
+		^
+		(?<hour> ..) : (?<minute> ..)
+		(?: : .. | )
+		\s
+		(?: < . \s* | \s \* \s )
+		(?<nick> $nick )
+		[> ]
+	}x,
+	qr{
+		^
+		--- \s Log \s opened \s
+		\S+ \s (?<amonth> ...) \s (?<day> ..) \s
+		..:..:.. \s (?<year> ....)
+	}x,
+	qr{
+		^
+		--- \s
+		Day \s changed \s \S+ \s
+		(?<amonth> ...) \s (?<day> ..) \s (?<year> ....)
+	}x,
+);
 
 my $y_clamp = 5;
 my $hour_rot = 5;
 
 my %data;
 
+sub process_line {
+	my ($line) = @_;
+
+	for my $re (@matches) {
+		$line =~ $re or next;
+
+		for my $key (qw(year month day hour minute)) {
+			if ($+{$key}) {
+				$state{$key} = $+{$key};
+			}
+		}
+		if ($+{amonth}) {
+			$state{month} = $month_map{$+{amonth}};
+		}
+
+		if ($+{nick}) {
+			$data{"$state{year}$state{month}$state{day}"}
+				->{int(($state{hour} * 60 + $state{minute}) / $y_clamp *
+				$y_clamp)} = 1;
+		}
+	}
+}
+
 if (1) {
 	my ($year, $month, $day, $hour, $minute);
-	while (<STDIN>) {
-		$_ =~ $filter_line or next;
-		($year, $month, $day, $hour, $minute) = ($1, $2, $3, $4, $5);
-		$data{"$year$month$day"}->{int(($hour * 60 + $minute) / $y_clamp * $y_clamp)} = 1;
+	while (my $line = <STDIN>) {
+		process_line($line);
 	}
 	nstore \%data, "fnord.stor";
 } else {
